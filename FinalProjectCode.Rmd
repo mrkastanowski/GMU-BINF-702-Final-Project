@@ -1,0 +1,256 @@
+---
+title: "BINF 702 Final Project"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+# Code for BINF 702 Final Project: Machine Learning Classification Methods using Gene Expression Data for SRBCT Class Prediction
+
+Group 7 - Michael Kastanowski & Elaine Kim
+
+## Packages and Data
+```{r}
+library(stats)
+library(pROC)
+library(ROCR)
+library(MASS)
+library(rpart)
+library(rpart.plot)
+library(ISLR)
+library(plsgenomics) #contains SRBCT data
+library(e1071)
+library(ggplot2)
+library(caTools)
+library(tree)
+library(glmnet)
+#library(factoextra)
+library(caret)
+library(randomForest)
+library(neuralnet)
+library(dplyr)
+data(SRBCT)
+data(Khan)
+```
+
+## Data Cleaning
+```{r}
+set.seed(1)
+attach(SRBCT)
+X<-data.frame(scale(X))
+colnames(X) <- gene.names[,2]
+Y<-as.factor(Y)
+SRBCT.factor<-factor(Y, levels=1:4, labels=c("EWS", "BL", "NB", "RMS"))
+SRBCT.data<-data.frame(scale(X), y=as.factor(SRBCT.factor)) #main data frame
+
+```
+
+
+## Feature Selection
+
+
+```{r}
+set.seed(1)
+model.FeatureSelection<-randomForest(y~., data=SRBCT.data)
+impFrame<-data.frame(model.FeatureSelection$importance)
+impFrameSort<-arrange(impFrame, desc(MeanDecreaseGini))
+
+
+```
+
+### Variable Importance Plot
+```{r}
+varImpPlot(model.FeatureSelection, n.var=10, cex=.5)
+top_10<-rownames(impFrameSort)[1:10]
+top_10
+```
+
+### Train/Test Split
+```{r}
+
+set.seed(1)
+split<-sample(1:nrow(SRBCT.data),  size=.75*nrow(SRBCT.data))
+SRBCT.data.2<-SRBCT.data[c(top_10, "y")]
+train<-SRBCT.data.2[split,]
+test<-SRBCT.data.2[-split,]
+```
+## Feature Exploration
+
+### Distribution of Gene Expression
+
+```{r}
+ggplot(stack(SRBCT.data.2[,-11]), aes(x = values, y = ind)) +
+  geom_boxplot()+labs(title="Expression Distribution of 10 Most Important Genes")+theme(axis.text=element_text(size=5.5))
+
+
+```
+
+
+
+### Distribution by Tumor Type
+```{r}
+
+SRBCT.EWS<-SRBCT.data.2[SRBCT.data.2$y=="EWS",][,-11]
+SRBCT.BL<-SRBCT.data.2[SRBCT.data.2$y=="BL",][,-11]
+SRBCT.NB<-SRBCT.data.2[SRBCT.data.2$y=="NB",][,-11]
+SRBCT.RMS<-SRBCT.data.2[SRBCT.data.2$y=="RMS",][,-11]
+```
+
+```{r}
+par(mfrow=c(2,1))
+ggplot(stack(SRBCT.EWS), aes(x = values, y = ind)) +
+  geom_boxplot()+labs(title="EWS Gene Expression Distribution")+theme(axis.text=element_text(size=5.5))
+ggplot(stack(SRBCT.BL), aes(x = values, y = ind)) +
+  geom_boxplot()+labs(title="BL Gene Expression Distribution")+theme(axis.text=element_text(size=5.5))
+ggplot(stack(SRBCT.NB), aes(x = values, y = ind)) +
+  geom_boxplot()+labs(title="NB Gene Expression Distribution")+theme(axis.text=element_text(size=5.5))
+ggplot(stack(SRBCT.RMS), aes(x = values, y = ind)) +
+  geom_boxplot()+labs(title="RMS Gene Expression Distribution")+theme(axis.text=element_text(size=5.5))
+```
+
+### Heatmaps by Tumor Type
+```{r}
+library(gplots)
+heatmap.2(as.matrix(SRBCT.EWS), main ="EWS Gene Expression",cexCol=.65,srtCol=45, margins=c(13,12))
+heatmap.2(as.matrix(SRBCT.BL), main ="BL Gene Expression",cexCol=.65,srtCol=45, margins=c(13,12))
+heatmap.2(as.matrix(SRBCT.NB), main ="NB Gene Expression",cexCol=.65,srtCol=45, margins=c(13,12))
+heatmap.2(as.matrix(SRBCT.RMS), main ="RMS Gene Expression",cexCol=.65,srtCol=45, margins=c(13,12))
+
+
+```
+
+### Miscellaneous Data
+```{r}
+median.overall<-data.frame(sapply(SRBCT.data.2[,-11], median))
+mean.overall<-data.frame(sapply(SRBCT.data.2[,-11], mean))
+  
+var.EWS<-data.frame(sapply(SRBCT.EWS, var))
+mean.EWS<-data.frame(sapply(SRBCT.EWS, mean))
+
+var.BL<-data.frame(sapply(SRBCT.BL, var))
+mean.BL<-data.frame(sapply(SRBCT.BL, mean))
+
+var.NB<-data.frame(sapply(SRBCT.NB, var))
+mean.NB<-data.frame(sapply(SRBCT.NB, mean))
+
+var.RMS<-data.frame(sapply(SRBCT.RMS, var))
+mean.RMS<-data.frame(sapply(SRBCT.RMS, mean))
+```
+
+
+# Classification Models
+
+## CART Classification
+```{r}
+#RPART MODEL
+model.rpart<-rpart(y~., data=train)
+model.rpart
+prp(model.rpart, extra=101)
+```
+```{r}
+# model testing
+rpart.pred<-predict(model.rpart, test, type="class")
+table(rpart.pred, test$y)
+mean(rpart.pred == test$y) #accuracy)l
+mean((as.numeric(test$y)-as.numeric(rpart.pred))^2) #mean square error
+```
+
+## Random Forest
+```{r}
+# Random Forest Model
+
+model.rf<-randomForest(y~., data=train)
+model.rf
+
+```
+```{r}
+rf.pred<-predict(model.rf, test)
+table(rf.pred, test$y)
+mean(rf.pred == test$y) #accuracy)l
+mean((as.numeric(test$y)-as.numeric(rf.pred))^2) #mean square error
+```
+```{r}
+#roc
+rf.roc<-multiclass.roc(as.numeric(rf.pred),as.numeric(test$y))
+plot.roc(rf.roc$rocs[[1]], print.auc=T, legacy.axes=T, main="ROC Curve for LDA Model")
+```
+
+
+## LDA
+```{r}
+#LDA Model
+model.LDA<-lda(y~., data=train)
+model.LDA
+summary(model.LDA)
+```
+```{r}
+#model testing
+lda.pred<-predict(model.LDA, test)
+lda.class<-lda.pred$class
+table(lda.class, test$y)
+mean(lda.class == test$y) #accuracy)l
+mean((as.numeric(test$y)-as.numeric(lda.class))^2) #mean square error
+```
+```{r}
+#ROC
+lda.roc<-multiclass.roc(as.numeric(lda.pred$class),as.numeric(test$y))
+plot.roc(lda.roc$rocs[[1]], print.auc=T, legacy.axes=T, main="ROC Curve for LDA Model")
+
+```
+
+## SVM
+```{r}
+# Tuning
+tune.out <- tune(svm, y~., data = train, kernel = "linear",
+                 ranges = list(cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100)))
+tune.out$best.model
+```
+
+```{r}
+#SVM Model
+model.SVM<- svm(y~., data=train, kernel="linear", cost = 0.1, scale = FALSE)
+
+summary(model.SVM)
+```
+```{r}
+#model testing
+svm.pred<-predict(model.SVM, newdata=test)
+table(svm.pred, test$y)#results errors
+mean(svm.pred == test$y) #accuracy)
+mean((as.numeric(test$y)-as.numeric(svm.pred))^2) #mean square error
+```
+
+```{r}
+#roc
+svm.roc<-multiclass.roc(as.numeric(svm.pred),as.numeric(test$y))
+plot.roc(svm.roc$rocs[[1]], print.auc=T, legacy.axes=T, main="ROC Curve for SVM Model")
+```
+
+## Neural Net
+```{r}
+set.seed(1)
+model.NN<- neuralnet(y~., data = train, linear.output=FALSE, threshold = 0.1 ,hidden=c(5,5)
+                     , algorithm="backprop"#,
+                     ,learningrate=.005
+                     )
+summary(model.NN)
+#model.NN$result.matrix
+plot(model.NN)
+#confusionMatrix(NN.pred, test$class)
+```
+
+```{r}
+#model testing
+model.NN$result.matrix[1,1]
+NN.pred<-predict(model.NN, newdata=test, type="class")
+table(apply(NN.pred, 1, which.max), test$y)
+mean(apply(NN.pred, 1, which.max)== as.numeric(test$y)) # Testing Error
+mean((as.numeric(test$y)-as.numeric(apply(NN.pred, 1, which.max)))^2) #mean square error
+```
+
+
+
+
+
+
